@@ -1,4 +1,4 @@
-//! Cloak
+//! Lockbox
 //!
 //! This library provides encryption and decryption using the AES-GCM (Galois/Counter Mode) algorithm.
 //! It ensures data integrity and confidentiality while providing flexibility for various use cases.
@@ -8,7 +8,6 @@
 //! - Simple and intuitive API for encrypting and decrypting data.
 //! - Support for customizable tags, Additional Authenticated Data (AAD), and Initialization Vectors (IV).
 //! - Secure default settings to avoid common cryptographic pitfalls.
-//! - Compatible with other implementations, such as Elixir's Cloak library.
 //! - Error handling with detailed, meaningful messages.
 
 mod tag;
@@ -46,7 +45,7 @@ pub enum Error {
 /// # Example
 ///
 /// ```
-/// let key = cloak::generate_key();
+/// let key = lockbox::generate_key();
 /// println!("Generated key: {:?}", key);
 /// ```
 pub fn generate_key() -> Vec<u8> {
@@ -76,7 +75,7 @@ impl Vault {
     /// # Example
     ///
     /// ```
-    /// use cloak::Vault;
+    /// use lockbox::Vault;
     ///
     /// let key = [0u8; 32]; // 256-bit key for AES-256
     /// let vault = Vault::new(&key, "AES.GCM.V1");
@@ -107,7 +106,7 @@ impl Vault {
     /// # Example
     ///
     /// ```
-    /// use cloak::{Vault, generate_key};
+    /// use lockbox::{Vault, generate_key};
     ///
     /// let key = generate_key();
     /// let vault = Vault::new(&key, "AES.GCM.V1");
@@ -115,13 +114,14 @@ impl Vault {
     /// let encrypted = vault.encrypt(b"Hello, world!").unwrap();
     /// ```
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, Error> {
-        // Generate a random 96-bit IV (12 bytes) to match the Elixir Cloak configuration
         let mut iv = [0u8; 12];
         OsRng.fill_bytes(&mut iv);
 
-        // Use the full 12-byte IV as the nonce
-        let nonce = Nonce::from_slice(&iv); // Use the full 12-byte IV
-        let aad = b"AES256GCM"; // Additional Authenticated Data
+        let nonce = Nonce::from_slice(&iv);
+
+        // Additional Authenticated Data
+        // TODO: make this configurable
+        let aad = b"AES256GCM";
 
         // Encrypt the plaintext with AAD
         let ciphertext_with_tag = self
@@ -168,7 +168,7 @@ impl Vault {
     /// # Example
     ///
     /// ```
-    /// use cloak::{Vault, generate_key};
+    /// use lockbox::{Vault, generate_key};
     ///
     /// let key = generate_key();
     /// let vault = Vault::new(&key, "AES.GCM.V1");
@@ -177,7 +177,7 @@ impl Vault {
     /// let decrypted = vault.decrypt(&encrypted).unwrap();
     /// assert_eq!(decrypted.as_bytes(), b"Hello, world!");
     /// ```
-    pub fn decrypt(&self, encrypted_payload: &[u8]) -> Result<String, Error> {
+    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<String, Error> {
         // Decode the tag using TagDecoder
         let (tag, remainder) =
             TagDecoder::decode(encrypted_payload).map_err(|_| Error::UnsupportedVersion)?;
@@ -195,9 +195,8 @@ impl Vault {
         combined_ciphertext.extend_from_slice(ciphertext);
         combined_ciphertext.extend_from_slice(ciphertag); // Append the tag for decryption
 
-        // Use the full 12-byte IV as the nonce
-        let nonce = Nonce::from_slice(&iv); // Use the full 12-byte IV
-        let aad = b"AES256GCM"; // Additional Authenticated Data
+        let nonce = Nonce::from_slice(&iv);
+        let aad = b"AES256GCM";
 
         let plaintext = self
             .cipher

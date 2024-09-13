@@ -1,7 +1,7 @@
-use cloak::Vault;
+use lockbox::Vault;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let key = cloak::generate_key();
+    let key = lockbox::generate_key();
     let vault = Vault::new(&key, "AES.GCM.V1");
 
     let plaintext = b"plaintext";
