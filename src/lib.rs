@@ -180,7 +180,7 @@ impl Vault {
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<String, Error> {
         // Decode the tag using TagDecoder
         let (tag, remainder) =
-            TagDecoder::decode(encrypted_payload).map_err(|_| Error::UnsupportedVersion)?;
+            TagDecoder::decode(ciphertext).map_err(|_| Error::UnsupportedVersion)?;
         if tag != self.tag.as_bytes() {
             return Err(Error::UnsupportedTag);
         }
