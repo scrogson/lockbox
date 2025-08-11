@@ -35,8 +35,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // use a stable key.
     let key = lockbox::generate_key();
 
-    // Initialize a vault with the key and a tag
-    let vault = Vault::new(&key, "AES.GCM.V1");
+    // Initialize a vault with the key
+    let vault = Vault::new(&key);
+
+    // Or with config options:
+    let vault = Vault::new(&key)
+        .with_tag("Custom.Tag.V1")
+        .with_aad("Custom.AAD");
 
     // Encrypt some plaintext
     let plaintext = b"Hello, secure world!";
