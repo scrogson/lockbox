@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Decrypt the ciphertext
     let decrypted = vault.decrypt(&encrypted)?;
-    println!("Decrypted: {}", decrypted);
+    println!("Decrypted: {decrypted}");
 
     assert_eq!(&decrypted.as_bytes(), plaintext);
 
