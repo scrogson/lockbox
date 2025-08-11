@@ -244,3 +244,84 @@ impl<I: IvLength> VaultWithConfig<I> {
         Ok(String::from_utf8(plaintext)?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PLAINTEXT: &[u8] = b"Hello, world";
+
+    #[test]
+    fn works_with_default_config() {
+        let key = generate_key();
+        let vault = Vault::new(&key);
+
+        let encrypted = vault.encrypt(PLAINTEXT).expect("encryption failed");
+        let decrypted = vault.decrypt(&encrypted).expect("decryption failed");
+
+        assert_eq!(decrypted.as_bytes(), PLAINTEXT);
+    }
+
+    #[test]
+    fn works_with_16_byte_iv_length() {
+        let key = generate_key();
+        let vault: VaultWithConfig<IvLength16> = VaultWithConfig::new(&key);
+
+        let encrypted = vault.encrypt(PLAINTEXT).expect("encryption failed");
+        let decrypted = vault.decrypt(&encrypted).expect("decryption failed");
+
+        assert_eq!(decrypted.as_bytes(), PLAINTEXT);
+    }
+
+    #[test]
+    fn works_with_custom_tag() {
+        let key = generate_key();
+        let vault = Vault::new(&key).with_tag("Custom.Tag.V1");
+
+        let encrypted = vault.encrypt(PLAINTEXT).expect("encryption failed");
+        let decrypted = vault.decrypt(&encrypted).expect("decryption failed");
+
+        assert_eq!(decrypted.as_bytes(), PLAINTEXT);
+    }
+
+    #[test]
+    fn works_with_custom_aad() {
+        let key = generate_key();
+        let vault: VaultWithConfig<DefaultIvLength> =
+            VaultWithConfig::new(&key).with_aad("Custom AAD");
+
+        let encrypted = vault.encrypt(PLAINTEXT).expect("encryption failed");
+        let decrypted = vault.decrypt(&encrypted).expect("decryption failed");
+
+        assert_eq!(decrypted.as_bytes(), PLAINTEXT);
+    }
+
+    #[test]
+    fn decryption_fails_with_wrong_tag() {
+        let key = generate_key();
+        let vault_1 = Vault::new(&key).with_tag("Tag.V1");
+        let vault_2 = Vault::new(&key).with_tag("Tag.V2");
+
+        let encrypted = vault_1.encrypt(PLAINTEXT).expect("encryption failed");
+        assert!(vault_2.decrypt(&encrypted).is_err());
+    }
+
+    #[test]
+    fn decryption_fails_with_wrong_aad() {
+        let key = generate_key();
+        let vault_1 = Vault::new(&key).with_aad("AAD.V1");
+        let vault_2 = Vault::new(&key).with_aad("AAD.V2");
+
+        let encrypted = vault_1.encrypt(PLAINTEXT).expect("encryption failed");
+        assert!(vault_2.decrypt(&encrypted).is_err());
+    }
+
+    #[test]
+    fn decryption_fails_with_invalid_ciphertext() {
+        let key = generate_key();
+        let vault = Vault::new(&key);
+
+        let invalid_ciphertext = b"Invalid data";
+        assert!(vault.decrypt(invalid_ciphertext).is_err());
+    }
+}
