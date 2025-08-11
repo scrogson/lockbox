@@ -10,13 +10,22 @@
 //! - Secure default settings to avoid common cryptographic pitfalls.
 //! - Error handling with detailed, meaningful messages.
 
+mod cipher;
+mod config;
 mod tag;
 
+use crate::cipher::{Aes256GcmIv16, Cipher, IvLength};
+use crate::config::VaultConfig;
 use crate::tag::{TagDecoder, TagEncoder};
-use aes_gcm::aead::rand_core::RngCore;
-use aes_gcm::aead::{Aead, KeyInit, OsRng, Payload};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
+use aes_gcm::aead::{KeyInit, OsRng, Payload};
+use aes_gcm::Aes256Gcm;
 use thiserror::Error;
+
+pub type Vault = VaultWithConfig<DefaultIvLength>;
+pub type DefaultIvLength = IvLength12;
+
+pub type IvLength12 = Aes256Gcm;
+pub type IvLength16 = Aes256GcmIv16;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -55,18 +64,17 @@ pub fn generate_key() -> Vec<u8> {
 /// Vault provides methods for encrypting and decrypting data using the AES-GCM algorithm.
 ///
 /// This struct supports customizable tags, Initialization Vectors (IV), and Additional Authenticated Data (AAD).
-pub struct Vault {
-    cipher: Aes256Gcm,
-    tag: String,
+pub struct VaultWithConfig<I: IvLength = DefaultIvLength> {
+    cipher: Cipher<I>,
+    pub config: VaultConfig,
 }
 
-impl Vault {
-    /// Creates a new `Vault` instance.
+impl<I: IvLength> VaultWithConfig<I> {
+    /// Creates a new `Vault` instance with default config.
     ///
     /// # Arguments
     ///
     /// * `key` - A byte slice representing the encryption key (32 bytes for AES-256).
-    /// * `tag` - A string that represents a version or identifier for the cipher.
     ///
     /// # Returns
     ///
@@ -78,18 +86,64 @@ impl Vault {
     /// use lockbox::Vault;
     ///
     /// let key = [0u8; 32]; // 256-bit key for AES-256
-    /// let vault = Vault::new(&key, "AES.GCM.V1");
+    /// let vault = Vault::new(&key);
     /// ```
-    pub fn new(key: &[u8], tag: &str) -> Self {
+    pub fn new(key: &[u8]) -> Self {
         Self {
-            cipher: Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key)),
-            tag: tag.to_string(),
+            cipher: Cipher::new(key),
+            config: VaultConfig::default(),
         }
+    }
+
+    /// Sets a custom tag for the vault.
+    ///
+    /// # Arguments
+    ///
+    /// * `tag` - A string that represents a version or identifier for the cipher.
+    ///
+    /// # Returns
+    ///
+    /// `Vault` instance with the updated tag.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lockbox::Vault;
+    ///
+    /// let key = [0u8; 32];
+    /// let vault = Vault::new(&key).with_tag("Custom.Tag.V1");
+    /// ```
+    pub fn with_tag(mut self, tag: &str) -> Self {
+        self.config.tag = tag.to_string();
+        self
+    }
+
+    /// Sets custom Additional Authenticated Data (AAD) for the vault.
+    ///
+    /// # Arguments
+    ///
+    /// * `aad` - A string representing Additional Authenticated Data.
+    ///
+    /// # Returns
+    ///
+    /// `Vault` instance with the updated AAD.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lockbox::Vault;
+    ///
+    /// let key = [0u8; 32];
+    /// let vault = Vault::new(&key).with_aad("Custom.AAD");
+    /// ```
+    pub fn with_aad(mut self, aad: &str) -> Self {
+        self.config.aad = aad.to_string();
+        self
     }
 
     /// Encrypts the provided plaintext.
     ///
-    /// Generates a random 96-bit (12-byte) Initialization Vector (IV) for each encryption.
+    /// Generates a random Initialization Vector (IV) for each encryption.
     ///
     /// # Arguments
     ///
@@ -109,29 +163,23 @@ impl Vault {
     /// use lockbox::{Vault, generate_key};
     ///
     /// let key = generate_key();
-    /// let vault = Vault::new(&key, "AES.GCM.V1");
+    /// let vault = Vault::new(&key);
     ///
     /// let encrypted = vault.encrypt(b"Hello, world!").unwrap();
     /// ```
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, Error> {
-        let mut iv = [0u8; 12];
-        OsRng.fill_bytes(&mut iv);
-
-        let nonce = Nonce::from_slice(&iv);
-
-        // Additional Authenticated Data
-        // TODO: make this configurable
-        let aad = b"AES256GCM";
+        let iv = self.cipher.init_iv();
+        let aad = self.config.aad.as_bytes();
 
         // Encrypt the plaintext with AAD
         let ciphertext_with_tag = self
             .cipher
             .encrypt(
-                nonce,
                 Payload {
                     msg: plaintext,
                     aad,
                 },
+                iv.to_vec(),
             )
             .map_err(|_| Error::Encrypt)?;
 
@@ -139,12 +187,12 @@ impl Vault {
         let (ciphertext, ciphertag) = ciphertext_with_tag.split_at(ciphertext_with_tag.len() - 16);
 
         // Encode the tag using TagEncoder
-        let encoded_tag = TagEncoder::encode(self.tag.as_bytes());
+        let encoded_tag = TagEncoder::encode(self.config.tag.as_bytes());
 
         // Concatenate Encoded Tag, IV, Ciphertag, and Ciphertext
         let mut encoded = Vec::new();
         encoded.extend_from_slice(&encoded_tag); // Encoded Tag
-        encoded.extend_from_slice(&iv); // 12-byte IV
+        encoded.extend_from_slice(&iv);
         encoded.extend_from_slice(ciphertag); // 16-byte Ciphertag
         encoded.extend_from_slice(ciphertext); // Ciphertext
 
@@ -171,7 +219,7 @@ impl Vault {
     /// use lockbox::{Vault, generate_key};
     ///
     /// let key = generate_key();
-    /// let vault = Vault::new(&key, "AES.GCM.V1");
+    /// let vault = Vault::new(&key);
     ///
     /// let encrypted = vault.encrypt(b"Hello, world!").unwrap();
     /// let decrypted = vault.decrypt(&encrypted).unwrap();
@@ -181,32 +229,15 @@ impl Vault {
         // Decode the tag using TagDecoder
         let (tag, remainder) =
             TagDecoder::decode(ciphertext).map_err(|_| Error::UnsupportedVersion)?;
-        if tag != self.tag.as_bytes() {
+        if tag != self.config.tag.as_bytes() {
             return Err(Error::UnsupportedTag);
         }
 
-        // Extract IV, Ciphertag, and Ciphertext
-        let iv = &remainder[..12]; // Full 12-byte IV
-        let ciphertag = &remainder[12..28]; // 16-byte Ciphertag
-        let ciphertext = &remainder[28..]; // Remaining is ciphertext
-
-        // Combine ciphertext and ciphertag for decryption
-        let mut combined_ciphertext = Vec::new();
-        combined_ciphertext.extend_from_slice(ciphertext);
-        combined_ciphertext.extend_from_slice(ciphertag); // Append the tag for decryption
-
-        let nonce = Nonce::from_slice(&iv);
-        let aad = b"AES256GCM";
+        let aad = self.config.aad.as_bytes();
 
         let plaintext = self
             .cipher
-            .decrypt(
-                nonce,
-                Payload {
-                    msg: &combined_ciphertext,
-                    aad,
-                },
-            )
+            .decrypt(remainder, aad)
             .map_err(|_| Error::Decrypt)?;
 
         // Return the decrypted data as a UTF-8 string
